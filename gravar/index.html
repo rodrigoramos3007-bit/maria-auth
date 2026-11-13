@@ -50,7 +50,7 @@
   #ver{position:fixed;inset:0;background:rgba(2,6,23,.95);z-index:70;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 110px)}
   #ver img{flex:1;min-height:0;width:100%;object-fit:contain;border-radius:10px}
   #ver .row{margin-top:12px}
-  #thumbs div{cursor:pointer}
+  #thumbs .x{position:absolute;top:-6px;right:-6px;width:26px;height:26px;border-radius:50%;background:var(--red);color:#fff;font-size:15px;font-weight:700;line-height:26px;text-align:center;padding:0;border:2px solid var(--bg)}
 </style>
 </head>
 <body>
@@ -102,7 +102,7 @@
 
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <label style="margin:0">Fotos desta palestra <small>(toque para ver ou apagar)</small></label>
+      <label style="margin:0">Fotos desta palestra</label>
       <button class="sec" id="btnGaleria" style="padding:6px 10px;font-size:13px">Da galeria</button>
     </div>
     <div id="thumbs"></div>
@@ -113,11 +113,6 @@
   <video id="camVideo" playsinline muted autoplay></video>
   <div id="camTopo"><span id="camRec">…</span><span id="camCont">0 fotos</span><span id="camX" style="cursor:pointer">✕ Fechar</span></div>
   <div id="camBar"><button id="btnFecharCam">Fechar</button><button id="btnCapturar">📸 Capturar</button></div>
-</div>
-<div id="ver" class="hide">
-  <img id="verImg" alt="">
-  <div class="st" id="verInfo" style="text-align:center;margin-top:8px"></div>
-  <div class="row"><button class="sec" id="btnVerFechar">Voltar</button><button style="background:var(--red)" id="btnApagar">🗑 Apagar foto</button></div>
 </div>
 <div id="flash"></div>
 <div id="toast"></div>
@@ -344,11 +339,17 @@ async function capturar(){
 }
 
 // ---------- ver e apagar fotos ----------
-let fotoAberta = null;
 function caixaFoto(url, caminho, k){
   const box = document.createElement('div'); if (k) box.dataset.k = k; if (caminho){ box.dataset.caminho = caminho; box.className='done'; }
   const im = document.createElement('img'); im.src = url; box.appendChild(im);
-  box.onclick = ()=> abrirFoto(box); return box;
+  const x = document.createElement('button'); x.className='x'; x.textContent='✕'; x.onclick = (e)=>{ e.stopPropagation(); apagarFoto(box, x); }; box.appendChild(x);
+  return box;
+}
+async function apagarFoto(box, x){
+  if (!box.dataset.caminho) return toast('Espere a foto terminar de enviar');
+  x.disabled = true; box.style.opacity = '.4';
+  try { await api({acao:'apagar_foto', id:SESSAO, caminho:box.dataset.caminho}); box.remove(); toast('Foto apagada'); }
+  catch(e){ x.disabled = false; box.style.opacity = '1'; toast('Não apagou: '+e.message); }
 }
 async function carregarFotos(){
   if (!SESSAO) return; const sessao = SESSAO;
@@ -360,21 +361,6 @@ async function carregarFotos(){
     pendentes.forEach(b=>$('thumbs').appendChild(b));
   } catch(e){}
 }
-function abrirFoto(box){
-  fotoAberta = box; $('verImg').src = box.querySelector('img').src;
-  $('verInfo').textContent = box.dataset.caminho ? '' : 'Esta foto ainda está sendo enviada. Espere terminar para apagar.';
-  $('btnApagar').disabled = !box.dataset.caminho; $('btnApagar').textContent = '🗑 Apagar foto';
-  $('ver').classList.remove('hide');
-}
-$('btnVerFechar').onclick = ()=>{ $('ver').classList.add('hide'); fotoAberta = null; };
-$('btnApagar').onclick = async ()=>{
-  const box = fotoAberta; if (!box || !box.dataset.caminho) return;
-  if ($('btnApagar').dataset.conf !== '1'){ $('btnApagar').dataset.conf='1'; $('btnApagar').textContent='Toque de novo para confirmar'; setTimeout(()=>{ $('btnApagar').dataset.conf=''; $('btnApagar').textContent='🗑 Apagar foto'; }, 4000); return; }
-  $('btnApagar').dataset.conf=''; $('btnApagar').disabled = true; $('btnApagar').textContent='Apagando…';
-  try { await api({acao:'apagar_foto', id:SESSAO, caminho:box.dataset.caminho}); box.remove(); $('ver').classList.add('hide'); toast('Foto apagada'); }
-  catch(e){ toast('Não apagou: '+e.message); $('btnApagar').disabled=false; $('btnApagar').textContent='🗑 Apagar foto'; }
-};
-
 $('btnFoto').onclick = abrirCamera;
 $('btnCapturar').onclick = capturar;
 $('camX').onclick = fecharCamera;
