@@ -47,6 +47,10 @@
   #camTopo{position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;display:flex;justify-content:space-between;font-size:14px}
   #camTopo span{background:rgba(2,6,23,.75);padding:6px 10px;border-radius:99px}
   #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:60;transition:opacity .25s}
+  #ver{position:fixed;inset:0;background:rgba(2,6,23,.95);z-index:70;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 110px)}
+  #ver img{flex:1;min-height:0;width:100%;object-fit:contain;border-radius:10px}
+  #ver .row{margin-top:12px}
+  #thumbs div{cursor:pointer}
 </style>
 </head>
 <body>
@@ -98,7 +102,7 @@
 
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <label style="margin:0">Fotos desta palestra</label>
+      <label style="margin:0">Fotos desta palestra <small>(toque para ver ou apagar)</small></label>
       <button class="sec" id="btnGaleria" style="padding:6px 10px;font-size:13px">Da galeria</button>
     </div>
     <div id="thumbs"></div>
@@ -109,6 +113,11 @@
   <video id="camVideo" playsinline muted autoplay></video>
   <div id="camTopo"><span id="camRec">…</span><span id="camCont">0 fotos</span><span id="camX" style="cursor:pointer">✕ Fechar</span></div>
   <div id="camBar"><button id="btnFecharCam">Fechar</button><button id="btnCapturar">📸 Capturar</button></div>
+</div>
+<div id="ver" class="hide">
+  <img id="verImg" alt="">
+  <div class="st" id="verInfo" style="text-align:center;margin-top:8px"></div>
+  <div class="row"><button class="sec" id="btnVerFechar">Voltar</button><button style="background:var(--red)" id="btnApagar">🗑 Apagar foto</button></div>
 </div>
 <div id="flash"></div>
 <div id="toast"></div>
@@ -158,7 +167,7 @@ async function enviar(it){
   else f.append('arquivo', it.blob, 'foto.jpg');
   const j = await api(f, true);
   if (it.tipo==='audio' && j.texto && it.sessao===SESSAO){ textoTela += (textoTela?'\n\n':'')+j.texto; render(); }
-  if (it.tipo==='foto'){ const b=document.querySelector(`[data-k="${it.k}"]`); if (b) b.className='done'; }
+  if (it.tipo==='foto'){ const b=document.querySelector(`[data-k="${it.k}"]`); if (b){ b.className='done'; b.dataset.caminho = j.caminho || ''; } }
   return j;
 }
 async function processar(){
@@ -189,13 +198,13 @@ async function carregarSessoes(selecionar){
   const o=document.createElement('option'); o.value='__nova'; o.textContent='➕ Nova palestra…'; sel.appendChild(o);
   const alvo = selecionar || SESSAO;
   if (alvo && j.itens.some(i=>i.id===alvo)) sel.value = alvo; else if (j.itens[0]) sel.value = j.itens[0].id;
-  if (sel.value !== '__nova') { SESSAO = sel.value; LS.set('gravador_sessao', SESSAO); }
+  if (sel.value !== '__nova') { SESSAO = sel.value; LS.set('gravador_sessao', SESSAO); carregarFotos(); }
   $('net').textContent='online'; $('net').className='good';
 }
 $('selSessao').onchange = (e)=>{
   if (e.target.value==='__nova'){ $('novaBox').classList.remove('hide'); $('novoEvento').value = EVENTO_PADRAO; $('novoAssunto').focus(); return; }
   if (gravando) trocarSegmento();
-  SESSAO = e.target.value; LS.set('gravador_sessao', SESSAO); $('thumbs').innerHTML=''; textoTela=''; render(); toast('Palestra trocada');
+  SESSAO = e.target.value; LS.set('gravador_sessao', SESSAO); $('thumbs').innerHTML=''; textoTela=''; render(); carregarFotos(); toast('Palestra trocada');
 };
 $('btnCancelNova').onclick = ()=>{ $('novaBox').classList.add('hide'); $('selSessao').value = SESSAO || ''; };
 $('btnCriar').onclick = async ()=>{
@@ -287,7 +296,7 @@ async function enviarFotos(files){
   if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
   for (const file of files){
     const k = Date.now()+'-'+Math.random().toString(36).slice(2,7);
-    const box = document.createElement('div'); box.dataset.k = k; const im = document.createElement('img'); im.src = URL.createObjectURL(file); box.appendChild(im); $('thumbs').appendChild(box);
+    $('thumbs').appendChild(caixaFoto(URL.createObjectURL(file), '', k));
     const blob = await reduzir(file);
     enfileirar({ k, tipo:'foto', sessao:SESSAO, blob });
   }
@@ -329,10 +338,43 @@ async function capturar(){
   const f = $('flash'); f.style.opacity = '.8'; setTimeout(()=>f.style.opacity='0', 120);
   const blob = await new Promise(r=>c.toBlob(r, 'image/jpeg', 0.9)); if (!blob) return toast('Não consegui capturar');
   const k = Date.now()+'-'+Math.random().toString(36).slice(2,7);
-  const box = document.createElement('div'); box.dataset.k = k; const im = document.createElement('img'); im.src = URL.createObjectURL(blob); box.appendChild(im); $('thumbs').appendChild(box);
+  $('thumbs').appendChild(caixaFoto(URL.createObjectURL(blob), '', k));
   enfileirar({ k, tipo:'foto', sessao:SESSAO, blob });
   camFotos++; $('camCont').textContent = camFotos + (camFotos===1 ? ' foto' : ' fotos');
 }
+
+// ---------- ver e apagar fotos ----------
+let fotoAberta = null;
+function caixaFoto(url, caminho, k){
+  const box = document.createElement('div'); if (k) box.dataset.k = k; if (caminho){ box.dataset.caminho = caminho; box.className='done'; }
+  const im = document.createElement('img'); im.src = url; box.appendChild(im);
+  box.onclick = ()=> abrirFoto(box); return box;
+}
+async function carregarFotos(){
+  if (!SESSAO) return; const sessao = SESSAO;
+  try {
+    const j = await api({acao:'fotos', id:sessao}); if (sessao !== SESSAO) return;
+    const pendentes = [...$('thumbs').children].filter(b=>!b.dataset.caminho);
+    $('thumbs').innerHTML='';
+    j.fotos.forEach(f=>{ if (f.url) $('thumbs').appendChild(caixaFoto(f.url, f.caminho)); });
+    pendentes.forEach(b=>$('thumbs').appendChild(b));
+  } catch(e){}
+}
+function abrirFoto(box){
+  fotoAberta = box; $('verImg').src = box.querySelector('img').src;
+  $('verInfo').textContent = box.dataset.caminho ? '' : 'Esta foto ainda está sendo enviada. Espere terminar para apagar.';
+  $('btnApagar').disabled = !box.dataset.caminho; $('btnApagar').textContent = '🗑 Apagar foto';
+  $('ver').classList.remove('hide');
+}
+$('btnVerFechar').onclick = ()=>{ $('ver').classList.add('hide'); fotoAberta = null; };
+$('btnApagar').onclick = async ()=>{
+  const box = fotoAberta; if (!box || !box.dataset.caminho) return;
+  if ($('btnApagar').dataset.conf !== '1'){ $('btnApagar').dataset.conf='1'; $('btnApagar').textContent='Toque de novo para confirmar'; setTimeout(()=>{ $('btnApagar').dataset.conf=''; $('btnApagar').textContent='🗑 Apagar foto'; }, 4000); return; }
+  $('btnApagar').dataset.conf=''; $('btnApagar').disabled = true; $('btnApagar').textContent='Apagando…';
+  try { await api({acao:'apagar_foto', id:SESSAO, caminho:box.dataset.caminho}); box.remove(); $('ver').classList.add('hide'); toast('Foto apagada'); }
+  catch(e){ toast('Não apagou: '+e.message); $('btnApagar').disabled=false; $('btnApagar').textContent='🗑 Apagar foto'; }
+};
+
 $('btnFoto').onclick = abrirCamera;
 $('btnCapturar').onclick = capturar;
 $('camX').onclick = fecharCamera;
