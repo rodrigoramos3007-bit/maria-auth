@@ -38,6 +38,15 @@
   .hide{display:none}
   #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 16px);background:#020617;border:1px solid var(--line);padding:10px 14px;border-radius:12px;font-size:14px;opacity:0;transition:.3s;pointer-events:none;max-width:90%}
   #toast.show{opacity:1}
+
+  #cam{position:fixed;inset:0;background:#000;z-index:50;display:flex;flex-direction:column}
+  #cam video{flex:1;width:100%;object-fit:contain;background:#000}
+  #camBar{padding:12px 14px calc(env(safe-area-inset-bottom) + 14px);display:flex;gap:10px;align-items:center;background:#020617}
+  #camBar button{flex:1;padding:18px 8px;font-size:18px}
+  #btnCapturar{background:var(--blue)} #btnFecharCam{background:#475569;flex:.6!important}
+  #camTopo{position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;display:flex;justify-content:space-between;font-size:14px}
+  #camTopo span{background:rgba(2,6,23,.75);padding:6px 10px;border-radius:99px}
+  #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:60;transition:opacity .25s}
 </style>
 </head>
 <body>
@@ -96,6 +105,12 @@
     <div class="st" id="stFila"></div>
   </div>
 </div>
+<div id="cam" class="hide">
+  <video id="camVideo" playsinline muted autoplay></video>
+  <div id="camTopo"><span id="camRec">…</span><span id="camCont">0 fotos</span></div>
+  <div id="camBar"><button id="btnFecharCam">Fechar</button><button id="btnCapturar">📸 Capturar</button></div>
+</div>
+<div id="flash"></div>
 <div id="toast"></div>
 
 <script>
@@ -278,7 +293,50 @@ async function enviarFotos(files){
   }
   toast(files.length>1 ? `${files.length} fotos na fila` : 'Foto na fila ✓');
 }
-$('btnFoto').onclick = ()=> $('inFoto').click();
+// ---------- câmera dentro do app: a gravação de áudio não para ----------
+let camStream = null, camFotos = 0;
+function camStatus(){ const ok = gravando && mr && mr.state==='recording';
+  $('camRec').innerHTML = gravando ? (ok ? '🔴 Gravação continua' : '⚠️ Gravação parada') : 'Sem gravação'; }
+async function abrirCamera(){
+  if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'}, width:{ideal:3840}, height:{ideal:2160} }, audio: gravando });
+  } catch(e){ toast('Sem câmera no app, abrindo a câmera do iPhone'); return $('inFoto').click(); }
+  // Se o iPhone derrubou o microfone antigo ao abrir a câmera, a gravação passa a usar o microfone desta câmera
+  if (gravando){
+    const antigoVivo = stream && stream.getAudioTracks().some(t=>t.readyState==='live' && !t.muted);
+    const novo = camStream.getAudioTracks()[0];
+    if (!antigoVivo && novo){ stream = new MediaStream([novo]); trocarSegmento(); }
+    else camStream.getAudioTracks().forEach(t=>{ if (!stream || !stream.getTracks().includes(t)) t.stop(); });
+  }
+  camFotos = 0; $('camCont').textContent = '0 fotos';
+  const v = $('camVideo'); v.srcObject = camStream; $('cam').classList.remove('hide');
+  try { await v.play(); } catch(e){}
+  camStatus(); camStatus.t = setInterval(camStatus, 2000);
+}
+function fecharCamera(){
+  clearInterval(camStatus.t);
+  if (camStream) camStream.getVideoTracks().forEach(t=>t.stop());
+  if (camStream && !gravando) camStream.getTracks().forEach(t=>t.stop());
+  camStream = null; $('camVideo').srcObject = null; $('cam').classList.add('hide');
+  if (gravando && (!mr || mr.state!=='recording')) { abrirMicrofone().then(ok=>{ if (ok) novoSegmento(); }); }
+  status();
+}
+async function capturar(){
+  const v = $('camVideo'); if (!v.videoWidth) return toast('Câmera ainda carregando');
+  const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  const f = $('flash'); f.style.opacity = '.8'; setTimeout(()=>f.style.opacity='0', 120);
+  const blob = await new Promise(r=>c.toBlob(r, 'image/jpeg', 0.9)); if (!blob) return toast('Não consegui capturar');
+  const k = Date.now()+'-'+Math.random().toString(36).slice(2,7);
+  const box = document.createElement('div'); box.dataset.k = k; const im = document.createElement('img'); im.src = URL.createObjectURL(blob); box.appendChild(im); $('thumbs').appendChild(box);
+  enfileirar({ k, tipo:'foto', sessao:SESSAO, blob });
+  camFotos++; $('camCont').textContent = camFotos + (camFotos===1 ? ' foto' : ' fotos');
+}
+$('btnFoto').onclick = abrirCamera;
+$('btnCapturar').onclick = capturar;
+$('camVideo').onclick = capturar;
+$('btnFecharCam').onclick = fecharCamera;
 $('btnGaleria').onclick = ()=> $('inGaleria').click();
 $('inFoto').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.value=''; };
 $('inGaleria').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.value=''; };
