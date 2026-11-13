@@ -6,6 +6,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Gravar DESK">
 <meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Gravar | DESK AllBridge</title>
 <style>
   :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#e2e8f0;--mut:#94a3b8;--red:#ef4444;--blue:#3b82f6;--green:#22c55e;--amber:#f59e0b}
@@ -128,8 +130,9 @@ const LS = { get(k){try{return localStorage.getItem(k)}catch(e){return null}}, s
 
 let CHAVE = null;
 const m = location.hash.match(/k=([A-Za-z0-9_\-]+)/);
-if (m) { CHAVE = m[1]; LS.set('gravador_chave', CHAVE); history.replaceState(null, '', location.pathname); }
-else CHAVE = LS.get('gravador_chave');
+if (m) { CHAVE = m[1]; LS.set('gravador_chave', CHAVE); }
+else { CHAVE = LS.get('gravador_chave'); if (CHAVE) history.replaceState(null, '', location.pathname + '#k=' + CHAVE); }
+// A chave fica no endereço de propósito: o atalho na Tela de Início do iPhone guarda o endereço, não a memória do Safari.
 
 function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove('show'),2600); }
 const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
