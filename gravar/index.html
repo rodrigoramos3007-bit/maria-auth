@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gravar DESK">
+<meta name="theme-color" content="#0f172a">
+<title>Gravar | DESK AllBridge</title>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#e2e8f0;--mut:#94a3b8;--red:#ef4444;--blue:#3b82f6;--green:#22c55e;--amber:#f59e0b}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 20px)}
+  h1{font-size:18px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center}
+  h1 small{font-weight:400;color:var(--mut);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+  label{font-size:13px;color:var(--mut);display:block;margin-bottom:4px}
+  select,input,textarea{width:100%;background:#0b1222;color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px}
+  textarea{min-height:70px;resize:vertical}
+  button{border:0;border-radius:12px;font-size:16px;font-weight:600;color:#fff;padding:12px;cursor:pointer}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  .big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .big button{padding:22px 8px;font-size:18px}
+  #btnRec{background:var(--red)} #btnRec.on{background:#7f1d1d;animation:p 1.6s infinite}
+  @keyframes p{50%{box-shadow:0 0 0 8px rgba(239,68,68,.25)}}
+  #btnFoto{background:var(--blue)}
+  .sec{background:#475569}.ok{background:var(--green)}
+  #live{min-height:90px;max-height:220px;overflow:auto;font-size:15px;white-space:pre-wrap}
+  #live .int{color:var(--mut)}
+  .st{font-size:13px;color:var(--mut);margin-top:6px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;background:#0b1222;border:1px solid var(--line);font-size:12px;margin:2px 4px 2px 0}
+  .warn{color:var(--amber)} .err{color:var(--red)} .good{color:var(--green)}
+  #thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  #thumbs div{position:relative}
+  #thumbs img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:2px solid var(--line)}
+  #thumbs div.done img{border-color:var(--green)} #thumbs div.fail img{border-color:var(--red)}
+  .hide{display:none}
+  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 16px);background:#020617;border:1px solid var(--line);padding:10px 14px;border-radius:12px;font-size:14px;opacity:0;transition:.3s;pointer-events:none;max-width:90%}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<h1>🎙 Gravar no DESK <small id="net">…</small></h1>
+
+<div id="semChave" class="card hide">
+  <b>Chave não encontrada.</b>
+  <p class="st">Abra este app pelo link com a chave que o Claude te mandou. Ele fica salvo neste celular.</p>
+</div>
+
+<div id="app" class="hide">
+  <div class="card">
+    <label>Palestra / assunto</label>
+    <select id="selSessao"></select>
+    <div id="novaBox" class="hide" style="margin-top:8px">
+      <input id="novoAssunto" placeholder="Ex: Apresentação da Corebridge" style="margin-bottom:6px">
+      <input id="novoPalestrante" placeholder="Palestrante (opcional)" style="margin-bottom:6px">
+      <input id="novoEvento" placeholder="Evento" style="margin-bottom:6px">
+      <div class="row"><button class="sec" id="btnCancelNova">Cancelar</button><button class="ok" id="btnCriar">Criar</button></div>
+    </div>
+  </div>
+
+  <div class="big">
+    <button id="btnRec">● Gravar</button>
+    <button id="btnFoto">📷 Foto</button>
+  </div>
+  <input type="file" id="inFoto" accept="image/*" capture="environment" class="hide">
+  <input type="file" id="inGaleria" accept="image/*" multiple class="hide">
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <label style="margin:0">Transcrição ao vivo</label>
+      <select id="selLang" style="width:auto;padding:4px 8px;font-size:13px">
+        <option value="en-US">Inglês</option><option value="pt-BR">Português</option><option value="es-US">Espanhol</option>
+      </select>
+    </div>
+    <div id="live"><span class="st">Toque em Gravar. A tela fica ligada enquanto grava.</span></div>
+    <div class="st" id="stRec"></div>
+  </div>
+
+  <div class="card">
+    <label>Nota rápida</label>
+    <textarea id="txtNota" placeholder="Algo importante que você quer guardar"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="sec" id="btnNota">Salvar nota</button>
+      <button style="background:var(--amber)" id="btnNotaImp">⭐ Importante</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <label style="margin:0">Fotos desta palestra</label>
+      <button class="sec" id="btnGaleria" style="padding:6px 10px;font-size:13px">Da galeria</button>
+    </div>
+    <div id="thumbs"></div>
+    <div class="st" id="stFila"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const API = 'https://kalmbgmutbizheziqdcg.supabase.co/functions/v1/desk-gravador';
+const EVENTO_PADRAO = 'Five Rings National Trading Camp 2026';
+const $ = (id) => document.getElementById(id);
+const LS = { get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
+
+// ---------- chave ----------
+let CHAVE = null;
+const m = location.hash.match(/k=([A-Za-z0-9_\-]+)/);
+if (m) { CHAVE = m[1]; LS.set('gravador_chave', CHAVE); history.replaceState(null, '', location.pathname); }
+else CHAVE = LS.get('gravador_chave');
+
+function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove('show'),2600); }
+const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+
+async function api(body, isForm){
+  const opts = { method:'POST', headers:{ 'x-gravador-chave': CHAVE } };
+  if (isForm) opts.body = body; else { opts.headers['content-type']='application/json'; opts.body = JSON.stringify(body); }
+  const r = await fetch(API, opts);
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok || j.erro) throw new Error(j.erro || ('HTTP '+r.status));
+  return j;
+}
+
+// ---------- fila com repetição (nada se perde se cair a internet) ----------
+const fila = [];
+let trabalhando = false;
+function enfileirar(tarefa){ fila.push(tarefa); mostrarFila(); processar(); }
+function mostrarFila(){ const n = fila.length; $('stFila').innerHTML = n ? `<span class="warn">${n} envio(s) na fila…</span>` : '<span class="good">Tudo enviado ✓</span>'; }
+async function processar(){
+  if (trabalhando) return; trabalhando = true;
+  while (fila.length){
+    const t = fila[0];
+    try { await t.run(); fila.shift(); t.ok && t.ok(); $('net').textContent='online'; $('net').className='good'; }
+    catch(e){ t.tent=(t.tent||0)+1; $('net').textContent='sem conexão'; $('net').className='err'; if (String(e.message).includes('chave')) { toast('Chave inválida'); break; } await sleep(Math.min(30000, 2000*t.tent)); }
+    mostrarFila();
+  }
+  trabalhando = false;
+}
+
+// ---------- sessões ----------
+let SESSAO = LS.get('gravador_sessao');
+async function carregarSessoes(selecionar){
+  const j = await api({acao:'listar'});
+  const sel = $('selSessao'); sel.innerHTML='';
+  j.itens.forEach(it=>{ const o=document.createElement('option'); o.value=it.id; o.textContent=it.assunto; sel.appendChild(o); });
+  const o=document.createElement('option'); o.value='__nova'; o.textContent='➕ Nova palestra…'; sel.appendChild(o);
+  const alvo = selecionar || SESSAO;
+  if (alvo && j.itens.some(i=>i.id===alvo)) sel.value = alvo; else if (j.itens[0]) sel.value = j.itens[0].id;
+  if (sel.value !== '__nova') { SESSAO = sel.value; LS.set('gravador_sessao', SESSAO); }
+  $('net').textContent='online'; $('net').className='good';
+}
+$('selSessao').onchange = (e)=>{
+  if (e.target.value==='__nova'){ $('novaBox').classList.remove('hide'); $('novoEvento').value = EVENTO_PADRAO; $('novoAssunto').focus(); return; }
+  if (gravando) { flushTexto(); trocarSegmento(); }
+  SESSAO = e.target.value; LS.set('gravador_sessao', SESSAO); $('thumbs').innerHTML=''; toast('Palestra trocada');
+};
+$('btnCancelNova').onclick = ()=>{ $('novaBox').classList.add('hide'); $('selSessao').value = SESSAO || ''; };
+$('btnCriar').onclick = async ()=>{
+  const assunto = $('novoAssunto').value.trim(); if (!assunto) return toast('Escreva o assunto');
+  $('btnCriar').disabled = true;
+  try {
+    if (gravando) flushTexto();
+    const j = await api({acao:'nova', assunto, palestrante:$('novoPalestrante').value.trim(), evento:$('novoEvento').value.trim()||EVENTO_PADRAO});
+    $('novaBox').classList.add('hide'); $('novoAssunto').value=''; $('novoPalestrante').value='';
+    if (gravando) trocarSegmento();
+    await carregarSessoes(j.item.id); $('thumbs').innerHTML=''; toast('Palestra criada ✓');
+  } catch(e){ toast('Erro: '+e.message); }
+  $('btnCriar').disabled = false;
+};
+
+// ---------- transcrição ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, gravando = false, bufferTexto = '', textoTela = '', interim = '', srFalhas = 0, srOk = true;
+function render(){ const el=$('live'); el.innerHTML=''; const a=document.createElement('span'); a.textContent=textoTela.slice(-4000); el.appendChild(a);
+  if (interim){ const b=document.createElement('span'); b.className='int'; b.textContent=' '+interim; el.appendChild(b); } el.scrollTop = el.scrollHeight; }
+function iniciarSR(){
+  if (!SR) { srOk=false; $('stRec').innerHTML='<span class="warn">Este navegador não transcreve. Só o áudio será salvo.</span>'; return; }
+  try { rec && rec.abort(); } catch(e){}
+  rec = new SR(); rec.lang = $('selLang').value; rec.continuous = true; rec.interimResults = true;
+  rec.onresult = (ev)=>{ interim=''; for (let i=ev.resultIndex;i<ev.results.length;i++){ const r=ev.results[i]; if (r.isFinal){ const t=r[0].transcript.trim(); if (t){ bufferTexto += ' '+t; textoTela += (textoTela?' ':'')+t; } } else interim += r[0].transcript; } srFalhas=0; render(); };
+  rec.onerror = (ev)=>{ if (ev.error==='not-allowed'||ev.error==='service-not-allowed'){ srFalhas+=3; } else srFalhas++; status(); };
+  rec.onend = ()=>{ if (gravando && srFalhas < 8 && document.visibilityState==='visible') setTimeout(()=>{ try{ rec.start(); }catch(e){ iniciarSR(); } }, 250); };
+  try { rec.start(); } catch(e){}
+}
+function flushTexto(){
+  const t = bufferTexto.trim(); bufferTexto='';
+  if (t && SESSAO){ const id=SESSAO; enfileirar({ run:()=>api({acao:'texto', id, texto:t}) }); }
+}
+setInterval(()=>{ if (bufferTexto.trim()) flushTexto(); }, 15000);
+$('selLang').onchange = ()=>{ if (gravando) iniciarSR(); };
+
+// ---------- áudio de backup (arquivos de até 3 min) ----------
+let stream=null, mr=null, partes=[], segmento=0, segTimer=null, segSessao=null, wakeLock=null, inicio=0;
+function tipoAudio(){ for (const t of ['audio/mp4','audio/webm;codecs=opus','audio/webm']) if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t; return ''; }
+async function iniciarAudio(){
+  if (!window.MediaRecorder) return;
+  try {
+    if (!stream || stream.getTracks().some(t=>t.readyState!=='live')) stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true}});
+    novoSegmento();
+  } catch(e){ $('stRec').innerHTML='<span class="warn">Sem acesso ao microfone para o áudio de backup.</span>'; }
+}
+function novoSegmento(){
+  const tipo = tipoAudio(); partes=[]; segmento++; segSessao = SESSAO;
+  const nome = String(Date.now());
+  mr = new MediaRecorder(stream, tipo ? {mimeType:tipo, audioBitsPerSecond:32000} : undefined);
+  mr.ondataavailable = (e)=>{ if (e.data && e.data.size) partes.push(e.data); };
+  const minhaSessao = segSessao;
+  mr.onstop = ()=>{ const blob = new Blob(partes, {type: mr.mimeType || 'audio/mp4'}); if (blob.size > 2000 && minhaSessao){
+      enfileirar({ run:()=>{ const f=new FormData(); f.append('acao','audio'); f.append('id',minhaSessao); f.append('segmento',nome); f.append('arquivo',blob,'audio'); return api(f,true); } }); } };
+  mr.start(1000);
+  clearTimeout(segTimer); segTimer = setTimeout(trocarSegmento, 180000);
+}
+function trocarSegmento(){ if (mr && mr.state!=='inactive'){ try{ mr.stop(); }catch(e){} } if (gravando && stream) setTimeout(novoSegmento, 50); }
+
+async function manterTelaLigada(){ try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e){} }
+
+function status(){
+  if (!gravando){ $('stRec').textContent=''; return; }
+  const min = Math.floor((Date.now()-inicio)/60000);
+  const sr = !SR ? '<span class="warn">sem transcrição</span>' : (srFalhas>=8 ? '<span class="warn">transcrição parou (áudio continua)</span>' : '<span class="good">transcrevendo</span>');
+  const au = (mr && mr.state==='recording') ? '<span class="good">áudio gravando</span>' : '<span class="warn">áudio parado</span>';
+  $('stRec').innerHTML = `<span class="pill">${min} min</span><span class="pill">${sr}</span><span class="pill">${au}</span>`;
+}
+setInterval(status, 5000);
+
+$('btnRec').onclick = async ()=>{
+  if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
+  if (!gravando){
+    gravando = true; inicio = Date.now(); srFalhas = 0;
+    $('btnRec').classList.add('on'); $('btnRec').textContent='■ Parar';
+    if ($('live').querySelector('.st')) { textoTela=''; render(); }
+    await iniciarAudio(); iniciarSR(); manterTelaLigada(); status();
+  } else {
+    gravando = false; $('btnRec').classList.remove('on'); $('btnRec').textContent='● Gravar';
+    try { rec && rec.stop(); } catch(e){}
+    clearTimeout(segTimer); if (mr && mr.state!=='inactive') mr.stop();
+    setTimeout(()=>{ stream && stream.getTracks().forEach(t=>t.stop()); stream=null; }, 400);
+    flushTexto(); try{ wakeLock && wakeLock.release(); }catch(e){} status(); toast('Gravação salva no DESK');
+  }
+};
+
+// Volta da câmera ou de outro app: religa tudo sozinho
+document.addEventListener('visibilitychange', async ()=>{
+  if (document.visibilityState==='hidden'){ if (gravando){ flushTexto(); } return; }
+  if (!gravando) return;
+  manterTelaLigada();
+  if (!mr || mr.state==='inactive' || !stream || stream.getTracks().some(t=>t.readyState!=='live')) { try { stream=null; await iniciarAudio(); } catch(e){} }
+  srFalhas = 0; iniciarSR(); status();
+});
+
+// ---------- fotos ----------
+async function reduzir(file){
+  try {
+    const img = await createImageBitmap(file);
+    const max = 2200, s = Math.min(1, max/Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width*s); c.height = Math.round(img.height*s);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise(r=>c.toBlob(b=>r(b||file), 'image/jpeg', 0.85));
+  } catch(e){ return file; }
+}
+async function enviarFotos(files){
+  if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
+  for (const file of files){
+    const id = SESSAO;
+    const box = document.createElement('div'); const im = document.createElement('img'); im.src = URL.createObjectURL(file); box.appendChild(im); $('thumbs').appendChild(box);
+    const blob = await reduzir(file);
+    enfileirar({ run:()=>{ const f=new FormData(); f.append('acao','foto'); f.append('id',id); f.append('arquivo', blob, 'foto.jpg'); return api(f,true); },
+      ok:()=>{ box.className='done'; } });
+  }
+  toast(files.length>1 ? `${files.length} fotos na fila` : 'Foto salva ✓');
+}
+$('btnFoto').onclick = ()=>{ if (gravando) flushTexto(); $('inFoto').click(); };
+$('btnGaleria').onclick = ()=> $('inGaleria').click();
+$('inFoto').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.value=''; };
+$('inGaleria').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.value=''; };
+
+// ---------- notas ----------
+function salvarNota(imp){
+  const t = $('txtNota').value.trim(); if (!t) return toast('Escreva a nota');
+  if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
+  const id = SESSAO; enfileirar({ run:()=>api({acao:'nota', id, texto:t, importante:imp}) });
+  $('txtNota').value=''; toast(imp ? 'Nota importante salva ⭐' : 'Nota salva ✓');
+}
+$('btnNota').onclick = ()=>salvarNota(false);
+$('btnNotaImp').onclick = ()=>salvarNota(true);
+
+window.addEventListener('beforeunload', (e)=>{ if (gravando || fila.length){ flushTexto(); e.preventDefault(); e.returnValue=''; } });
+
+// ---------- início ----------
+(async ()=>{
+  if (!CHAVE){ $('semChave').classList.remove('hide'); return; }
+  $('app').classList.remove('hide'); mostrarFila();
+  try { await carregarSessoes(); } catch(e){ $('net').textContent = e.message.includes('chave') ? 'chave inválida' : 'sem conexão'; $('net').className='err'; toast('Não consegui falar com o DESK: '+e.message); }
+})();
+</script>
+</body>
+</html>
