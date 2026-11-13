@@ -69,7 +69,7 @@
 
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <label style="margin:0">Transcrição ao vivo</label>
+      <label style="margin:0">Transcrição (chega a cada 1 min)</label>
       <select id="selLang" style="width:auto;padding:4px 8px;font-size:13px">
         <option value="en-US">Inglês</option><option value="pt-BR">Português</option><option value="es-US">Espanhol</option>
       </select>
@@ -99,12 +99,14 @@
 <div id="toast"></div>
 
 <script>
+// Versão 2 (11/13/2026): o áudio é a fonte. Grava em pedaços de 1 minuto, cada pedaço sobe e o
+// servidor transcreve. A fila fica salva no celular (IndexedDB): recarregar a página não perde nada.
 const API = 'https://kalmbgmutbizheziqdcg.supabase.co/functions/v1/desk-gravador';
 const EVENTO_PADRAO = 'Five Rings National Trading Camp 2026';
+const SEG_MS = 60000;
 const $ = (id) => document.getElementById(id);
 const LS = { get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
 
-// ---------- chave ----------
 let CHAVE = null;
 const m = location.hash.match(/k=([A-Za-z0-9_\-]+)/);
 if (m) { CHAVE = m[1]; LS.set('gravador_chave', CHAVE); history.replaceState(null, '', location.pathname); }
@@ -112,7 +114,6 @@ else CHAVE = LS.get('gravador_chave');
 
 function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove('show'),2600); }
 const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
-
 async function api(body, isForm){
   const opts = { method:'POST', headers:{ 'x-gravador-chave': CHAVE } };
   if (isForm) opts.body = body; else { opts.headers['content-type']='application/json'; opts.body = JSON.stringify(body); }
@@ -122,21 +123,47 @@ async function api(body, isForm){
   return j;
 }
 
-// ---------- fila com repetição (nada se perde se cair a internet) ----------
-const fila = [];
-let trabalhando = false;
-function enfileirar(tarefa){ fila.push(tarefa); mostrarFila(); processar(); }
+// ---------- fila salva no celular ----------
+let db = null;
+function abrirDB(){ return new Promise((res)=>{ try { const r = indexedDB.open('gravador', 1);
+  r.onupgradeneeded = ()=> r.result.createObjectStore('fila', { keyPath:'k' });
+  r.onsuccess = ()=>{ db = r.result; res(); }; r.onerror = ()=>res(); } catch(e){ res(); } }); }
+function dbPut(item){ return new Promise(res=>{ if(!db) return res(); try{ const t=db.transaction('fila','readwrite'); t.objectStore('fila').put(item); t.oncomplete=res; t.onerror=res; }catch(e){res();} }); }
+function dbDel(k){ return new Promise(res=>{ if(!db) return res(); try{ const t=db.transaction('fila','readwrite'); t.objectStore('fila').delete(k); t.oncomplete=res; t.onerror=res; }catch(e){res();} }); }
+function dbAll(){ return new Promise(res=>{ if(!db) return res([]); try{ const q=db.transaction('fila').objectStore('fila').getAll(); q.onsuccess=()=>res(q.result||[]); q.onerror=()=>res([]); }catch(e){res([]);} }); }
+
+const fila = []; let trabalhando = false;
+async function enfileirar(item){ item.k = item.k || (Date.now()+'-'+Math.random().toString(36).slice(2,7)); fila.push(item); await dbPut(item); mostrarFila(); processar(); }
 function mostrarFila(){ const n = fila.length; $('stFila').innerHTML = n ? `<span class="warn">${n} envio(s) na fila…</span>` : '<span class="good">Tudo enviado ✓</span>'; }
+async function enviar(it){
+  if (it.tipo==='texto') return api({acao:'texto', id:it.sessao, texto:it.texto});
+  if (it.tipo==='nota') return api({acao:'nota', id:it.sessao, texto:it.texto, importante:it.importante});
+  const f = new FormData(); f.append('acao', it.tipo); f.append('id', it.sessao);
+  if (it.tipo==='audio'){ f.append('segmento', it.nome); f.append('idioma', it.idioma||'en'); f.append('arquivo', it.blob, 'audio'); }
+  else f.append('arquivo', it.blob, 'foto.jpg');
+  const j = await api(f, true);
+  if (it.tipo==='audio' && j.texto && it.sessao===SESSAO){ textoTela += (textoTela?'\n\n':'')+j.texto; render(); }
+  if (it.tipo==='foto'){ const b=document.querySelector(`[data-k="${it.k}"]`); if (b) b.className='done'; }
+  return j;
+}
 async function processar(){
   if (trabalhando) return; trabalhando = true;
+  let falhasSeguidas = 0;
   while (fila.length){
-    const t = fila[0];
-    try { await t.run(); fila.shift(); t.ok && t.ok(); $('net').textContent='online'; $('net').className='good'; }
-    catch(e){ t.tent=(t.tent||0)+1; $('net').textContent='sem conexão'; $('net').className='err'; if (String(e.message).includes('chave')) { toast('Chave inválida'); break; } await sleep(Math.min(30000, 2000*t.tent)); }
+    const it = fila.shift();
+    try { await enviar(it); await dbDel(it.k); falhasSeguidas = 0; $('net').textContent='online'; $('net').className='good'; }
+    catch(e){
+      it.tent = (it.tent||0)+1; fila.push(it);              // vai para o fim: um envio com problema não trava os outros
+      if (String(e.message).includes('chave')) { toast('Chave inválida'); fila.length && mostrarFila(); break; }
+      if (/Failed to fetch|Load failed|NetworkError|HTTP 5/.test(e.message)) { $('net').textContent='sem conexão'; $('net').className='err'; }
+      falhasSeguidas++;
+      if (falhasSeguidas >= fila.length) { await sleep(Math.min(20000, 3000*falhasSeguidas)); }
+    }
     mostrarFila();
   }
   trabalhando = false;
 }
+setInterval(()=>{ if (fila.length && !trabalhando) processar(); }, 15000);
 
 // ---------- sessões ----------
 let SESSAO = LS.get('gravador_sessao');
@@ -152,101 +179,83 @@ async function carregarSessoes(selecionar){
 }
 $('selSessao').onchange = (e)=>{
   if (e.target.value==='__nova'){ $('novaBox').classList.remove('hide'); $('novoEvento').value = EVENTO_PADRAO; $('novoAssunto').focus(); return; }
-  if (gravando) { flushTexto(); trocarSegmento(); }
-  SESSAO = e.target.value; LS.set('gravador_sessao', SESSAO); $('thumbs').innerHTML=''; toast('Palestra trocada');
+  if (gravando) trocarSegmento();
+  SESSAO = e.target.value; LS.set('gravador_sessao', SESSAO); $('thumbs').innerHTML=''; textoTela=''; render(); toast('Palestra trocada');
 };
 $('btnCancelNova').onclick = ()=>{ $('novaBox').classList.add('hide'); $('selSessao').value = SESSAO || ''; };
 $('btnCriar').onclick = async ()=>{
   const assunto = $('novoAssunto').value.trim(); if (!assunto) return toast('Escreva o assunto');
   $('btnCriar').disabled = true;
   try {
-    if (gravando) flushTexto();
     const j = await api({acao:'nova', assunto, palestrante:$('novoPalestrante').value.trim(), evento:$('novoEvento').value.trim()||EVENTO_PADRAO});
     $('novaBox').classList.add('hide'); $('novoAssunto').value=''; $('novoPalestrante').value='';
     if (gravando) trocarSegmento();
-    await carregarSessoes(j.item.id); $('thumbs').innerHTML=''; toast('Palestra criada ✓');
+    await carregarSessoes(j.item.id); $('thumbs').innerHTML=''; textoTela=''; render(); toast('Palestra criada ✓');
   } catch(e){ toast('Erro: '+e.message); }
   $('btnCriar').disabled = false;
 };
 
-// ---------- transcrição ----------
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, gravando = false, bufferTexto = '', textoTela = '', interim = '', srFalhas = 0, srOk = true;
-function render(){ const el=$('live'); el.innerHTML=''; const a=document.createElement('span'); a.textContent=textoTela.slice(-4000); el.appendChild(a);
-  if (interim){ const b=document.createElement('span'); b.className='int'; b.textContent=' '+interim; el.appendChild(b); } el.scrollTop = el.scrollHeight; }
-function iniciarSR(){
-  if (!SR) { srOk=false; $('stRec').innerHTML='<span class="warn">Este navegador não transcreve. Só o áudio será salvo.</span>'; return; }
-  try { rec && rec.abort(); } catch(e){}
-  rec = new SR(); rec.lang = $('selLang').value; rec.continuous = true; rec.interimResults = true;
-  rec.onresult = (ev)=>{ interim=''; for (let i=ev.resultIndex;i<ev.results.length;i++){ const r=ev.results[i]; if (r.isFinal){ const t=r[0].transcript.trim(); if (t){ bufferTexto += ' '+t; textoTela += (textoTela?' ':'')+t; } } else interim += r[0].transcript; } srFalhas=0; render(); };
-  rec.onerror = (ev)=>{ if (ev.error==='not-allowed'||ev.error==='service-not-allowed'){ srFalhas+=3; } else srFalhas++; status(); };
-  rec.onend = ()=>{ if (gravando && srFalhas < 8 && document.visibilityState==='visible') setTimeout(()=>{ try{ rec.start(); }catch(e){ iniciarSR(); } }, 250); };
-  try { rec.start(); } catch(e){}
-}
-function flushTexto(){
-  const t = bufferTexto.trim(); bufferTexto='';
-  if (t && SESSAO){ const id=SESSAO; enfileirar({ run:()=>api({acao:'texto', id, texto:t}) }); }
-}
-setInterval(()=>{ if (bufferTexto.trim()) flushTexto(); }, 15000);
-$('selLang').onchange = ()=>{ if (gravando) iniciarSR(); };
+// ---------- tela da transcrição ----------
+let textoTela = '';
+function render(){ const el=$('live'); el.textContent = textoTela ? textoTela.slice(-5000) : (gravando ? 'Gravando… o texto aparece aqui a cada 1 minuto.' : 'Toque em Gravar. A tela fica ligada enquanto grava.'); el.scrollTop = el.scrollHeight; }
 
-// ---------- áudio de backup (arquivos de até 3 min) ----------
-let stream=null, mr=null, partes=[], segmento=0, segTimer=null, segSessao=null, wakeLock=null, inicio=0;
+// ---------- gravação em pedaços de 1 minuto ----------
+let gravando=false, stream=null, mr=null, partes=[], segTimer=null, wakeLock=null, inicio=0, ultimoPedaco=0;
 function tipoAudio(){ for (const t of ['audio/mp4','audio/webm;codecs=opus','audio/webm']) if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t; return ''; }
-async function iniciarAudio(){
-  if (!window.MediaRecorder) return;
-  try {
-    if (!stream || stream.getTracks().some(t=>t.readyState!=='live')) stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:true}});
-    novoSegmento();
-  } catch(e){ $('stRec').innerHTML='<span class="warn">Sem acesso ao microfone para o áudio de backup.</span>'; }
+async function abrirMicrofone(){
+  if (stream && stream.getTracks().every(t=>t.readyState==='live')) return true;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:true, autoGainControl:true}}); return true; }
+  catch(e){ toast('Sem acesso ao microfone'); return false; }
 }
 function novoSegmento(){
-  const tipo = tipoAudio(); partes=[]; segmento++; segSessao = SESSAO;
-  const nome = String(Date.now());
-  mr = new MediaRecorder(stream, tipo ? {mimeType:tipo, audioBitsPerSecond:32000} : undefined);
-  mr.ondataavailable = (e)=>{ if (e.data && e.data.size) partes.push(e.data); };
-  const minhaSessao = segSessao;
-  mr.onstop = ()=>{ const blob = new Blob(partes, {type: mr.mimeType || 'audio/mp4'}); if (blob.size > 2000 && minhaSessao){
-      enfileirar({ run:()=>{ const f=new FormData(); f.append('acao','audio'); f.append('id',minhaSessao); f.append('segmento',nome); f.append('arquivo',blob,'audio'); return api(f,true); } }); } };
-  mr.start(1000);
-  clearTimeout(segTimer); segTimer = setTimeout(trocarSegmento, 180000);
+  if (!gravando || !stream) return;
+  const tipo = tipoAudio(); const sessao = SESSAO; const nome = String(Date.now()); const pedaco = [];
+  let rec;
+  try { rec = new MediaRecorder(stream, tipo ? {mimeType:tipo, audioBitsPerSecond:48000} : undefined); }
+  catch(e){ toast('Erro no gravador: '+e.message); return; }
+  rec.ondataavailable = (e)=>{ if (e.data && e.data.size) pedaco.push(e.data); };
+  rec.onstop = ()=>{ const blob = new Blob(pedaco, {type: rec.mimeType || 'audio/mp4'});
+    if (blob.size > 3000 && sessao) { ultimoPedaco = Date.now(); enfileirar({ tipo:'audio', sessao, nome, blob, idioma: $('selLang').value.slice(0,2) }); } };
+  rec.start(1000); mr = rec;
+  clearTimeout(segTimer); segTimer = setTimeout(trocarSegmento, SEG_MS);
 }
-function trocarSegmento(){ if (mr && mr.state!=='inactive'){ try{ mr.stop(); }catch(e){} } if (gravando && stream) setTimeout(novoSegmento, 50); }
-
+function trocarSegmento(){ const velho = mr; mr = null; if (velho && velho.state!=='inactive'){ try{ velho.stop(); }catch(e){} } if (gravando) novoSegmento(); }
 async function manterTelaLigada(){ try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e){} }
-
 function status(){
   if (!gravando){ $('stRec').textContent=''; return; }
   const min = Math.floor((Date.now()-inicio)/60000);
-  const sr = !SR ? '<span class="warn">sem transcrição</span>' : (srFalhas>=8 ? '<span class="warn">transcrição parou (áudio continua)</span>' : '<span class="good">transcrevendo</span>');
-  const au = (mr && mr.state==='recording') ? '<span class="good">áudio gravando</span>' : '<span class="warn">áudio parado</span>';
-  $('stRec').innerHTML = `<span class="pill">${min} min</span><span class="pill">${sr}</span><span class="pill">${au}</span>`;
+  const au = (mr && mr.state==='recording') ? '<span class="good">gravando</span>' : '<span class="warn">gravação parada, toque em Parar e Gravar</span>';
+  $('stRec').innerHTML = `<span class="pill">${min} min</span><span class="pill">${au}</span>`;
 }
 setInterval(status, 5000);
 
 $('btnRec').onclick = async ()=>{
   if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
   if (!gravando){
-    gravando = true; inicio = Date.now(); srFalhas = 0;
+    if (!(await abrirMicrofone())) return;
+    gravando = true; inicio = Date.now();
     $('btnRec').classList.add('on'); $('btnRec').textContent='■ Parar';
-    if ($('live').querySelector('.st')) { textoTela=''; render(); }
-    await iniciarAudio(); iniciarSR(); manterTelaLigada(); status();
+    novoSegmento(); manterTelaLigada(); render(); status();
   } else {
-    gravando = false; $('btnRec').classList.remove('on'); $('btnRec').textContent='● Gravar';
-    try { rec && rec.stop(); } catch(e){}
-    clearTimeout(segTimer); if (mr && mr.state!=='inactive') mr.stop();
-    setTimeout(()=>{ stream && stream.getTracks().forEach(t=>t.stop()); stream=null; }, 400);
-    flushTexto(); try{ wakeLock && wakeLock.release(); }catch(e){} status(); toast('Gravação salva no DESK');
+    gravando = false; clearTimeout(segTimer);
+    $('btnRec').classList.remove('on'); $('btnRec').textContent='● Gravar';
+    const velho = mr; mr = null; if (velho && velho.state!=='inactive') velho.stop();
+    setTimeout(()=>{ stream && stream.getTracks().forEach(t=>t.stop()); stream=null; }, 500);
+    try{ wakeLock && wakeLock.release(); }catch(e){} status(); toast('Gravação encerrada. Enviando o último pedaço…');
   }
 };
 
-// Volta da câmera ou de outro app: religa tudo sozinho
+// Volta da câmera ou de outro app: religa sozinho
 document.addEventListener('visibilitychange', async ()=>{
-  if (document.visibilityState==='hidden'){ if (gravando){ flushTexto(); } return; }
+  if (document.visibilityState!=='visible') return;
+  if (fila.length && !trabalhando) processar();
   if (!gravando) return;
   manterTelaLigada();
-  if (!mr || mr.state==='inactive' || !stream || stream.getTracks().some(t=>t.readyState!=='live')) { try { stream=null; await iniciarAudio(); } catch(e){} }
-  srFalhas = 0; iniciarSR(); status();
+  if (!mr || mr.state!=='recording' || !stream || stream.getTracks().some(t=>t.readyState!=='live')){
+    if (mr && mr.state!=='inactive'){ try{ mr.stop(); }catch(e){} } mr=null;
+    stream = null; if (await abrirMicrofone()) novoSegmento();
+  }
+  status();
 });
 
 // ---------- fotos ----------
@@ -262,15 +271,14 @@ async function reduzir(file){
 async function enviarFotos(files){
   if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
   for (const file of files){
-    const id = SESSAO;
-    const box = document.createElement('div'); const im = document.createElement('img'); im.src = URL.createObjectURL(file); box.appendChild(im); $('thumbs').appendChild(box);
+    const k = Date.now()+'-'+Math.random().toString(36).slice(2,7);
+    const box = document.createElement('div'); box.dataset.k = k; const im = document.createElement('img'); im.src = URL.createObjectURL(file); box.appendChild(im); $('thumbs').appendChild(box);
     const blob = await reduzir(file);
-    enfileirar({ run:()=>{ const f=new FormData(); f.append('acao','foto'); f.append('id',id); f.append('arquivo', blob, 'foto.jpg'); return api(f,true); },
-      ok:()=>{ box.className='done'; } });
+    enfileirar({ k, tipo:'foto', sessao:SESSAO, blob });
   }
-  toast(files.length>1 ? `${files.length} fotos na fila` : 'Foto salva ✓');
+  toast(files.length>1 ? `${files.length} fotos na fila` : 'Foto na fila ✓');
 }
-$('btnFoto').onclick = ()=>{ if (gravando) flushTexto(); $('inFoto').click(); };
+$('btnFoto').onclick = ()=> $('inFoto').click();
 $('btnGaleria').onclick = ()=> $('inGaleria').click();
 $('inFoto').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.value=''; };
 $('inGaleria').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.value=''; };
@@ -279,19 +287,21 @@ $('inGaleria').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.valu
 function salvarNota(imp){
   const t = $('txtNota').value.trim(); if (!t) return toast('Escreva a nota');
   if (!SESSAO) return toast('Escolha ou crie a palestra primeiro');
-  const id = SESSAO; enfileirar({ run:()=>api({acao:'nota', id, texto:t, importante:imp}) });
+  enfileirar({ tipo:'nota', sessao:SESSAO, texto:t, importante:imp });
   $('txtNota').value=''; toast(imp ? 'Nota importante salva ⭐' : 'Nota salva ✓');
 }
 $('btnNota').onclick = ()=>salvarNota(false);
 $('btnNotaImp').onclick = ()=>salvarNota(true);
 
-window.addEventListener('beforeunload', (e)=>{ if (gravando || fila.length){ flushTexto(); e.preventDefault(); e.returnValue=''; } });
+window.addEventListener('beforeunload', (e)=>{ if (gravando){ e.preventDefault(); e.returnValue=''; } });
 
-// ---------- início ----------
 (async ()=>{
   if (!CHAVE){ $('semChave').classList.remove('hide'); return; }
-  $('app').classList.remove('hide'); mostrarFila();
-  try { await carregarSessoes(); } catch(e){ $('net').textContent = e.message.includes('chave') ? 'chave inválida' : 'sem conexão'; $('net').className='err'; toast('Não consegui falar com o DESK: '+e.message); }
+  $('app').classList.remove('hide');
+  await abrirDB();
+  const pendentes = await dbAll(); pendentes.forEach(p=>fila.push(p)); mostrarFila(); render();
+  try { await carregarSessoes(); } catch(e){ $('net').textContent = e.message.includes('chave') ? 'chave inválida' : 'sem conexão'; $('net').className='err'; }
+  if (fila.length) processar();
 })();
 </script>
 </body>
