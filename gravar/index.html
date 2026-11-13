@@ -39,9 +39,9 @@
   #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 16px);background:#020617;border:1px solid var(--line);padding:10px 14px;border-radius:12px;font-size:14px;opacity:0;transition:.3s;pointer-events:none;max-width:90%}
   #toast.show{opacity:1}
 
-  #cam{position:fixed;inset:0;background:#000;z-index:50;display:flex;flex-direction:column}
+  #cam{position:fixed;top:0;left:0;right:0;height:100dvh;background:#000;z-index:50;display:flex;flex-direction:column}
   #cam video{flex:1;width:100%;object-fit:contain;background:#000}
-  #camBar{padding:12px 14px calc(env(safe-area-inset-bottom) + 14px);display:flex;gap:10px;align-items:center;background:#020617}
+  #camBar{padding:12px 14px calc(env(safe-area-inset-bottom) + 110px);display:flex;gap:10px;align-items:center;background:#020617}
   #camBar button{flex:1;padding:18px 8px;font-size:18px}
   #btnCapturar{background:var(--blue)} #btnFecharCam{background:#475569;flex:.6!important}
   #camTopo{position:absolute;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;display:flex;justify-content:space-between;font-size:14px}
@@ -107,7 +107,7 @@
 </div>
 <div id="cam" class="hide">
   <video id="camVideo" playsinline muted autoplay></video>
-  <div id="camTopo"><span id="camRec">…</span><span id="camCont">0 fotos</span></div>
+  <div id="camTopo"><span id="camRec">…</span><span id="camCont">0 fotos</span><span id="camX" style="cursor:pointer">✕ Fechar</span></div>
   <div id="camBar"><button id="btnFecharCam">Fechar</button><button id="btnCapturar">📸 Capturar</button></div>
 </div>
 <div id="flash"></div>
@@ -335,7 +335,7 @@ async function capturar(){
 }
 $('btnFoto').onclick = abrirCamera;
 $('btnCapturar').onclick = capturar;
-$('camVideo').onclick = capturar;
+$('camX').onclick = fecharCamera;
 $('btnFecharCam').onclick = fecharCamera;
 $('btnGaleria').onclick = ()=> $('inGaleria').click();
 $('inFoto').onchange = (e)=>{ enviarFotos([...e.target.files]); e.target.value=''; };
